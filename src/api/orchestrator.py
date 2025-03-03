@@ -13,7 +13,7 @@ from agents.editor import editor
 from evaluate.evaluators import evaluate_article_in_background
 from prompty.tracer import trace, Tracer, console_tracer, PromptyTracer
 
-types = Literal["message", "researcher", "marketing", "designer","writer", "editor", "error", "partial", ]
+types = Literal["message", "researcher", "marketing", "designer", "writer", "editor", "error", "partial"]
 
 class Message(BaseModel):
     type: types
@@ -126,7 +126,6 @@ def create(research_context, product_context, assignment_context, evaluate=False
 
         processed_writer_result = writer.process(full_result)
 
-        # Then send it to the editor, to decide if it's good or not
         yield start_message("editor")
         editor_response = editor.edit(processed_writer_result['article'], processed_writer_result["feedback"])
 
@@ -137,7 +136,6 @@ def create(research_context, product_context, assignment_context, evaluate=False
         yield complete_message("editor", editor_response)
         yield complete_message("writer", {"complete": True})
 
-    #these need to be yielded for calling evals from evaluate.evaluate
     yield send_research(research_result)
     yield send_products(product_result)
     yield send_writer(full_result) 
@@ -170,14 +168,26 @@ def test_create_article(research_context, product_context, assignment_context):
                 print(f'Article: {article}')
     
 if __name__ == "__main__":
-    from tracing import init_tracing
-    tracer = init_tracing(local_tracing=True)
+    # Attempt to initialize tracing. If the function is missing, warn and proceed.
+    try:
+        from tracing import init_tracing
+        tracer = init_tracing(local_tracing=True)
+    except ImportError:
+        print("Warning: 'init_tracing' not found in tracing.py. Proceeding without tracing initialization.")
+        tracer = None  # Set a fallback tracer or None
+
+    # Initialize the PromptyTracer regardless of tracing initialization
     local_trace = PromptyTracer()
     Tracer.add("PromptyTracer", local_trace.tracer)
+    
     research_context = "Can you find the latest camping trends and what folks are doing in the winter?"
     product_context = "Can you use a selection of tents and sleeping bags as context?"
     assignment_context = '''Write a fun and engaging article that includes the research and product information. 
     The article should be between 800 and 1000 words.
     Make sure to cite sources in the article as you mention the research not at the end.'''
 
-    test_create_article(research_context=research_context, product_context=product_context, assignment_context=assignment_context)
+    test_create_article(
+        research_context=research_context, 
+        product_context=product_context, 
+        assignment_context=assignment_context
+    )

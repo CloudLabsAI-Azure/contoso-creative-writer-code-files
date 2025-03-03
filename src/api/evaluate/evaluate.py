@@ -1,4 +1,3 @@
-# https://github.com/Azure-Samples/contoso-chat/blob/may-2024-updates/evaluations/evaluate-chat-flow-sdk.ipynb
 import os
 import sys
 import json
@@ -7,123 +6,24 @@ from .evaluators import ArticleEvaluator, ImageEvaluator
 from orchestrator import create
 from prompty.tracer import trace
 from azure.identity import DefaultAzureCredential
-from azure.ai.projects import AIProjectClient
-from azure.ai.projects.models import Evaluation, Dataset, EvaluatorConfiguration, ConnectionType
-from azure.ai.evaluation import RelevanceEvaluator, GroundednessEvaluator, FluencyEvaluator, CoherenceEvaluator
-from azure.ai.evaluation import ViolenceEvaluator, HateUnfairnessEvaluator, SelfHarmEvaluator, SexualEvaluator
-from openai import AzureOpenAI
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-
 from dotenv import load_dotenv
 
 load_dotenv()
 folder = Path(__file__).parent.absolute().as_posix()
 
-# # Add the api directory to the sys.path
-# sys.path.append(os.path.abspath('../src/api'))
-
-
-def evaluate_remote(data_path):
-    # Create an Azure AI Client from a connection string, copied from your AI Studio project.
-    # At the moment, it should be in the format "<HostName>;<AzureSubscriptionId>;<ResourceGroup>;<HubName>"
-    # Customer needs to login to Azure subscription via Azure CLI and set the environment variables
-
-    ai_project_conn_str = os.getenv("AZURE_LOCATION")+".api.azureml.ms;"+os.getenv("AZURE_SUBSCRIPTION_ID")+";"+os.getenv("AZURE_RESOURCE_GROUP")+";"+os.getenv("AZURE_AI_PROJECT_NAME")
-
-    project_client = AIProjectClient.from_connection_string(
-        credential=DefaultAzureCredential(),
-        conn_str=ai_project_conn_str,
-    )
-
-    data_id = project_client.upload_file(data_path)
-
-    default_connection = project_client.connections.get_default(connection_type=ConnectionType.AZURE_OPEN_AI)
-
-    deployment_name = os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"]
-    api_version = os.environ["AZURE_OPENAI_API_VERSION"]
-
-    model_config = default_connection.to_evaluator_model_config(deployment_name=deployment_name, api_version=api_version)
-    # Create an evaluation
-    evaluation = Evaluation(
-        display_name="Remote Evaluation",
-        description="Evaluation of dataset",
-        data=Dataset(id=data_id),
-        evaluators={
-            "relevance": EvaluatorConfiguration(
-                id=RelevanceEvaluator.id,
-                init_params={
-                    "model_config": model_config
-                },
-            ),
-            "fluency": EvaluatorConfiguration(
-                id=FluencyEvaluator.id,
-                init_params={
-                    "model_config": model_config
-                },
-            ),
-            "coherence": EvaluatorConfiguration(
-                id=CoherenceEvaluator.id,
-                init_params={
-                    "model_config": model_config
-                },
-            ),
-            "groundedness": EvaluatorConfiguration(
-                id=GroundednessEvaluator.id,
-                init_params={
-                    "model_config": model_config
-                },
-            ),
-            "violence": EvaluatorConfiguration(
-                id=ViolenceEvaluator.id,
-                init_params={
-                    "azure_ai_project": project_client.scope
-                },
-            ), 
-            "hate_unfairness": EvaluatorConfiguration(
-                id=HateUnfairnessEvaluator.id,
-                init_params={
-                    "azure_ai_project": project_client.scope
-                },
-            ),
-            "self_harm": EvaluatorConfiguration(
-                id=SelfHarmEvaluator.id,
-                init_params={
-                    "azure_ai_project": project_client.scope
-                },
-            ),
-            "sexual": EvaluatorConfiguration(
-                id=SexualEvaluator.id,
-                init_params={
-                    "azure_ai_project": project_client.scope
-                },
-            ),
-        },
-    )
-
-    # Create evaluation
-    evaluation_response = project_client.evaluations.create(
-        evaluation=evaluation,
-    )
-    # Get evaluation
-    get_evaluation_response = project_client.evaluations.get(evaluation_response.id)
-
-    print("----------------------------------------------------------------")
-    print("Created remote evaluation, evaluation ID: ", get_evaluation_response.id)
-    print("Evaluation status: ", get_evaluation_response.status)
-    print("AI Studio URI: ", get_evaluation_response.properties["AiStudioEvaluationUri"])
-    print("----------------------------------------------------------------")
-
-
-
 def run_orchestrator(research_context, product_context, assignment_context):
-    query = {"research_context": research_context, "product_context": product_context, "assignment_context": assignment_context}
+    query = {
+        "research_context": research_context, 
+        "product_context": product_context, 
+        "assignment_context": assignment_context
+    }
     context = {}
     response = None
 
-    for result in create(research_context, product_context, assignment_context,evaluate=False):
-        if not type(result) == tuple:
+    for result in create(research_context, product_context, assignment_context, evaluate=False):
+        if not isinstance(result, tuple):
             parsed_result = json.loads(result)
-        if type(parsed_result) is list:
+        if isinstance(parsed_result, list):
             if parsed_result[0] == "researcher":
                 context['research'] = parsed_result[1]
             if parsed_result[0] == "products":
@@ -138,37 +38,50 @@ def run_orchestrator(research_context, product_context, assignment_context):
     }
 
 @trace
-def evaluate_orchestrator(model_config, project_scope,  data_path):
+def evaluate_orchestrator(model_config, project_scope, data_path):
     writer_evaluator = ArticleEvaluator(model_config, project_scope)
 
     data = []    
     eval_data = []
-    print(f"\n===== Creating articles to evaluate using data provided in {data_path}")
-    print("")
+    print(f"\n===== Creating articles to evaluate using data provided in {data_path}\n")
     with open(data_path) as f:
         for num, line in enumerate(f):
             row = json.loads(line)
             data.append(row)
-            print(f"generating article {num +1}")
-            eval_data.append(run_orchestrator(row["research_context"], row["product_context"], row["assignment_context"]))
+            print(f"Generating article {num + 1}")
+            eval_data.append(run_orchestrator(
+                row["research_context"], 
+                row["product_context"], 
+                row["assignment_context"]
+            ))
 
-    # write out eval data to a file so we can re-run evaluation on it
-    with jsonlines.open(folder + '/eval_data.jsonl', 'w') as writer:
+    # Write out evaluation data to a file so it can be reused
+    import jsonlines
+    eval_data_file = folder + '/eval_data.jsonl'
+    with jsonlines.open(eval_data_file, 'w') as writer:
         for row in eval_data:
             writer.write(row)
 
-    eval_data_path = folder + '/eval_data.jsonl'
-
     print(f"\n===== Evaluating the generated articles")
-    eval_results = writer_evaluator(data_path=eval_data_path)
+    eval_results = writer_evaluator(data_path=eval_data_file)
     import pandas as pd
 
     print("Evaluation summary:\n")
     print("View in Azure AI Studio at: " + str(eval_results['studio_url']))
     metrics = {key: [value] for key, value in eval_results['metrics'].items()}
     results_df = pd.DataFrame.from_dict(metrics)
-    results_df_gpt_evals = results_df[['relevance.gpt_relevance', 'fluency.gpt_fluency', 'coherence.gpt_coherence','groundedness.gpt_groundedness']]
-    results_df_content_safety = results_df[['violence.violence_defect_rate', 'self_harm.self_harm_defect_rate', 'hate_unfairness.hate_unfairness_defect_rate','sexual.sexual_defect_rate']]
+    results_df_gpt_evals = results_df[[
+        'relevance.gpt_relevance', 
+        'fluency.gpt_fluency', 
+        'coherence.gpt_coherence',
+        'groundedness.gpt_groundedness'
+    ]]
+    results_df_content_safety = results_df[[
+        'violence.violence_defect_rate', 
+        'self_harm.self_harm_defect_rate', 
+        'hate_unfairness.hate_unfairness_defect_rate',
+        'sexual.sexual_defect_rate'
+    ]]
 
     mean_df = results_df_gpt_evals.mean()
     print("\nAverage scores:")
@@ -178,19 +91,19 @@ def evaluate_orchestrator(model_config, project_scope,  data_path):
     print("\nContent safety average defect rate:")
     print(content_safety_mean_df)
 
+    # Optionally, write the evaluation results to disk
     results_df.to_markdown(folder + '/eval_results.md')
     with open(folder + '/eval_results.md', 'a') as file:
-        file.write("\n\nAverages scores:\n\n")
+        file.write("\n\nAverage scores:\n\n")
     mean_df.to_markdown(folder + '/eval_results.md', 'a')
 
     with jsonlines.open(folder + '/eval_results.jsonl', 'w') as writer:
         writer.write(eval_results)
 
-    return eval_results
+    return mean_df  # Return the computed average scores
 
 def evaluate_image(project_scope, image_path):
     image_evaluator = ImageEvaluator(project_scope)
-
     import pathlib 
     import base64
     import jsonlines
@@ -198,84 +111,51 @@ def evaluate_image(project_scope, image_path):
 
     def local_image_resize(image_path):
         print(image_path)
-        # Check the size of the original image
-        original_size_kb = os.path.getsize(image_path) / 1024 # Convert bytes to kilobytes
+        original_size_kb = os.path.getsize(image_path) / 1024  # Convert bytes to kilobytes
         if original_size_kb <= 1024:
             print(f"The image size is {original_size_kb:.2f} KB, which is within the limit.")
         else:
-            print(f"The image size is {original_size_kb:.2f} KB, which is larger than the limit of 1024KB. Compressing image...")
-            # Open the image
+            print(f"The image size is {original_size_kb:.2f} KB, which exceeds the limit. Compressing image...")
             from PIL import Image
-
             with Image.open(image_path) as img:
-                # Get the image name
                 image_name = os.path.basename(image_path)
-                #get the file name minus extension
                 name, extension = os.path.splitext(image_name)
-
-                # This is code to add an image from a file path
                 parent = pathlib.Path(__file__).parent.resolve()
                 path = os.path.join(parent, "data")
-
                 output_path = os.path.join(path, f"compressed_{name}.png")
-                # Compress and save the image
-                # downsize the image with an ANTIALIAS filter (gives the highest quality)
-                img = img.resize((img.width // 2, img.height // 2),Image.LANCZOS)
+                img = img.resize((img.width // 2, img.height // 2), Image.LANCZOS)
                 img.save(output_path, quality=95)  
                 new_size_kb = os.path.getsize(output_path) / 1024
                 if new_size_kb > 1024:
-                    print(f"The new image size is {new_size_kb:.2f} KB, which is still above the limit. Compressing again.")
-                    # Compress and save the image
-                    # downsize the image with an ANTIALIAS filter (gives the highest quality)
-                    img = img.resize((img.width // 2, img.height // 2),Image.LANCZOS)
+                    print(f"New image size {new_size_kb:.2f} KB still exceeds limit. Compressing further.")
+                    img = img.resize((img.width // 2, img.height // 2), Image.LANCZOS)
                     img.save(output_path, quality=85)  
                     new_size_kb = os.path.getsize(output_path) / 1024
-                    print(f"The image size is {new_size_kb:.2f} KB, which is within the limit..")
+                    print(f"Final image size is {new_size_kb:.2f} KB, within the limit.")
                 else:
-                    print(f"The image size is {new_size_kb:.2f} KB, which is within the limit..")
+                    print(f"Image size is {new_size_kb:.2f} KB, within the limit.")
             image_path = output_path
         return image_path
 
     def make_image_message(url_path):
+        from azure.identity import get_bearer_token_provider
+        from openai import AzureOpenAI
         token_provider = get_bearer_token_provider(
-        DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
+            DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
         )
-
         client = AzureOpenAI(
-            azure_endpoint = f"{os.getenv('AZURE_OPENAI_ENDPOINT')}", 
+            azure_endpoint=f"{os.getenv('AZURE_OPENAI_ENDPOINT')}", 
             api_version=f"{os.getenv('AZURE_OPENAI_API_VERSION')}",
             azure_ad_token_provider=token_provider
         )
-
-        sys_message = "You are an AI assistant that describes images in details."
-
-
-        print(f"\n===== Calling Open AI to describe image and retrieve response")
+        sys_message = "You are an AI assistant that describes images in detail."
+        print(f"\n===== Calling OpenAI to describe image")
         completion = client.chat.completions.create(
-        model="gpt-4",
-        messages= [
-                        {
-                            "role": "system", 
-                            "content": [
-                                {"type": "text", "text": sys_message}
-                            ]
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": "Can you describe this image?"},
-                                {"type": "image_url", "image_url": {"url": url_path}},
-                            ],
-                        },
-                    ],
-            )
-        
-        message = [
+            model="gpt-4",
+            messages=[
                 {
-                    "role": "system",
-                    "content": [
-                        {"type": "text", "text": sys_message}
-                    ],
+                    "role": "system", 
+                    "content": [{"type": "text", "text": sys_message}]
                 },
                 {
                     "role": "user",
@@ -284,156 +164,121 @@ def evaluate_image(project_scope, image_path):
                         {"type": "image_url", "image_url": {"url": url_path}},
                     ],
                 },
-                {
-                    "role": "assistant",
-                    "content": [
-                        {"type": "text", "text": completion.choices[0].message.content},
-                    ],
-                },
-            ]
-        
+            ],
+        )
+        message = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": sys_message}],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Can you describe this image?"},
+                    {"type": "image_url", "image_url": {"url": url_path}},
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": completion.choices[0].message.content}],
+            },
+        ]
         return message
-        
 
     if validators.url(image_path):
         url_path = image_path
     else:
-        if type(image_path) is list: 
+        if isinstance(image_path, list): 
             resized_image_urls = []
             for image in image_path:
                 new_image = local_image_resize(image)
-                #get the file type
                 _, extension = os.path.splitext(new_image)
-                # Normalize the extension (e.g., .JPG -> jpg)
                 extension = extension.lower().strip('.')
-
-                #encode an image or you can add an image file from a url
                 with pathlib.Path(new_image).open("rb") as image_file:
                     encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
-
                     url_path = f"data:image/{extension};base64,{encoded_image}"
                     resized_image_urls.append(url_path)
         else:
-            print('yes_else')
-            print(image_path)
+            print('Processing single image')
             resized_image = local_image_resize(image_path)
-
-            #get the file type
             _, extension = os.path.splitext(resized_image)
-            # Normalize the extension (e.g., .JPG -> jpg)
             extension = extension.lower().strip('.')
-
-            #encode an image or you can add an image file from a url
             with pathlib.Path(resized_image).open("rb") as image_file:
                 encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
-
             url_path = f"data:image/{extension};base64,{encoded_image}"
 
     messages = []
-
-    if type(image_path) is list: 
+    if isinstance(image_path, list): 
         for image_url in resized_image_urls:
-            message = make_image_message(image_url)
-            messages.append(message)
+            msg = make_image_message(image_url)
+            messages.append(msg)
     else:
-        message = make_image_message(url_path)
-        messages.append(message)
+        msg = make_image_message(url_path)
+        messages.append(msg)
 
-    print(f"\n===== Evaluating response")
+    print(f"\n===== Evaluating image response")
     eval_results = image_evaluator(messages=messages)
-
     import pandas as pd
-
     print("Image Evaluation summary:\n")
-    print("View in Azure AI Studio at: ")
-    print(str(eval_results['studio_url']))
-    print('')
-
+    print("View in Azure AI Studio at: " + str(eval_results['studio_url']) + "\n")
     metrics = {key: [value] for key, value in eval_results['metrics'].items()}
     results_df = pd.DataFrame.from_dict(metrics)
-
     eval_results['rows'][0].pop('inputs.conversation')
     rows = eval_results['rows'][0]
     scores = [{key: value} for key, value in rows.items() if 'score' in key]
     scores_df = pd.DataFrame.from_dict(scores)
     mean_scores_df = scores_df.mean()
-
     print("Image Evaluation Content Safety Scores:\n")
-    print(mean_scores_df)
-    print('')
-    print("Protected Material Prescence:\n")
+    print(mean_scores_df, "\n")
+    print("Protected Material Presence:\n")
     if results_df.empty:
         protected_materials_evals = mean_scores_df
     else:
-        protected_materials_evals = results_df[['protected_material.fictional_characters_label', 'protected_material.logos_and_brands_label', 'protected_material.artwork_label']]
-        protected_materials_evals = protected_materials_evals.mean()
-        
+        protected_materials_evals = results_df[[
+            'protected_material.fictional_characters_label', 
+            'protected_material.logos_and_brands_label', 
+            'protected_material.artwork_label'
+        ]].mean()
     print(protected_materials_evals)
-
-    title = "Protected Material Prescence:\n\n"
+    title = "Protected Material Presence:\n\n"
     df_md = protected_materials_evals.to_markdown()
     full_md = title + "\n" + df_md
-
     with open(folder + '/image_eval_results.md', 'w') as file:
         file.write(full_md)
-        
     with open(folder + '/image_eval_results.md', 'a') as file:
         file.write("\n\nContent Safety Scores:\n\n")
     mean_scores_df.to_markdown(folder + '/image_eval_results.md', 'a')
-
     with jsonlines.open(folder + '/image_eval_results.jsonl', 'w') as writer:
         writer.write(eval_results)
-
     print('')
-    # Filter the content safety scores greater than 1
     scores_greater_than_1 = mean_scores_df[mean_scores_df > 1]
-    print('content eval scores')
-    scores = []
-    # Check if any scores are greater than 1
+    print('Content eval scores:')
+    scores_list = []
     if not scores_greater_than_1.empty:
-        # Get the score names and their values
-        score_names = scores_greater_than_1.index
-        score_values = scores_greater_than_1.values
-
-        # Display the results
-        print("Scores greater than 1:")
-        for name, value in zip(score_names, score_values):
+        for name, value in zip(scores_greater_than_1.index, scores_greater_than_1.values):
             print(f"{name}: {value}")
-            scores.append({f"{name}: {value}"})
+            scores_list.append({f"{name}": value})
     else:
         print("No scores are greater than 1.")
-
-    # Filter the protected material scores greater than 1
-    print('protected material scores')
+    print('Protected material scores:')
     pm_scores_greater_than_0 = protected_materials_evals[protected_materials_evals > 0]
-    # Check if any scores are greater than 1
     if not pm_scores_greater_than_0.empty:
-        # Get the score names and their values
-        score_names = pm_scores_greater_than_0.index
-        score_values = pm_scores_greater_than_0.values
-
-        # Display the results
-        print("Scores greater than 0:")
-        for name, value in zip(score_names, score_values):
+        for name, value in zip(pm_scores_greater_than_0.index, pm_scores_greater_than_0.values):
             print(f"{name}: {value}")
-            scores.append({f"{name}: {value}"})
+            scores_list.append({f"{name}": value})
     else:
-        print("No scores are greater than 1.")
-
-    return scores
-
-
+        print("No protected material scores are greater than 0.")
+    return scores_list
 
 if __name__ == "__main__":
     import time
     import jsonlines
     import pathlib
-    
 
     model_config = {
-        "azure_deployment":os.environ["AZURE_OPENAI_4_EVAL_DEPLOYMENT_NAME"],   
-        "api_version":os.environ["AZURE_OPENAI_API_VERSION"],
-        "azure_endpoint":f"https://{os.getenv('AZURE_OPENAI_NAME')}.cognitiveservices.azure.com/"
+        "azure_deployment": os.environ["AZURE_OPENAI_4_EVAL_DEPLOYMENT_NAME"],   
+        "api_version": os.environ["AZURE_OPENAI_API_VERSION"],
+        "azure_endpoint": f"https://{os.getenv('AZURE_OPENAI_NAME')}.cognitiveservices.azure.com/"
     }
     project_scope = {
         "subscription_id": os.environ["AZURE_SUBSCRIPTION_ID"],   
@@ -441,21 +286,15 @@ if __name__ == "__main__":
         "project_name": os.environ["AZURE_AI_PROJECT_NAME"],        
     }
     
-    start=time.time()
-    print(f"Starting evaluate...")
-
-    eval_result = evaluate_orchestrator(model_config, project_scope, data_path=folder +"/eval_inputs.jsonl")
-    evaluate_remote(data_path=folder +"/eval_data.jsonl")
-
-    # img_paths = []
-    # # This is code to add an image from a file path
-    # for image_num in range(1,4):
-    #     parent = pathlib.Path(__file__).parent.resolve()
-    #     path = os.path.join(parent, "data")
-    #     image_path = os.path.join(path, f"{image_num}.png")
-    #     img_paths.append(image_path)
-
-    # eval_image_result = evaluate_image(project_scope, img_paths)
-
-    end=time.time()
-    print(f"Finished evaluate in {end - start}s")
+    start = time.time()
+    print("Starting evaluation...")
+    # Run local evaluation and get average scores from the generated articles.
+    avg_scores = evaluate_orchestrator(
+        model_config, 
+        project_scope, 
+        data_path=folder + "/eval_inputs.jsonl"
+    )
+    print("\nFinal Average Scores:")
+    print(avg_scores)
+    end = time.time()
+    print(f"Finished evaluation in {end - start}s")
