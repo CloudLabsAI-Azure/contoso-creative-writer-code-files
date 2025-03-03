@@ -130,20 +130,6 @@ export const Task = () => {
             onChange={(e) => setWriting(e.target.value)}
           />
         </div>
-
-      <div className="text-start mt-3">
-        <label
-          htmlFor="image-upload"
-          className="block text-sm font-medium leading-6 text-gray-900"
-        >
-          Image Upload
-        </label>
-        <p className="mt-1 text-sm leading-6 text-gray-400">
-          Add an image for your blog (optional)
-        </p>
-        <ImageUpload/>
-      </div>
-
       </div>
       <div className="flex justify-end gap-2 mt-10">
         <button
