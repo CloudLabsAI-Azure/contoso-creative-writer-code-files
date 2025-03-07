@@ -24,4 +24,4 @@ deployments:
       version: "2024-07-18"
     sku:
       name: "GlobalStandard"
-      capacity: 80
+      capacity: 8
